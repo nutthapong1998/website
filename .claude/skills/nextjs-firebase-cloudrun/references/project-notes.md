@@ -88,6 +88,25 @@ installed version disagrees with this file, the installed version wins
   verify `gcloud beta run domain-mappings` flags with `--help` before the
   first real run.
 
+## TLS / domain decision (June 2026)
+
+The owner uses a **Cloudflare Origin Certificate**, so the production path
+is Cloudflare → **GCP HTTPS Load Balancer** (Origin CA cert, serverless
+NEG) → Cloud Run — NOT Cloud Run domain mappings / Google-managed certs.
+Consequences:
+
+- DNS is an A record to the LB's static IP, proxied (orange) from day one.
+- Cloud Run ingress stays **"all"** on purpose: the CI smoke test hits the
+  candidate tag's `*.run.app` URL with the `X-Origin-Auth` header.
+  Switching ingress to internal+LB would break that smoke test — don't
+  "harden" it without redesigning the pipeline.
+- The Origin CA private key is a secret: uploaded once via
+  `gcloud compute ssl-certificates create`, local files deleted, never
+  committed.
+- Runbook commands live in README "One-time setup §3"; LB commands are
+  written-but-not-run (no GCP project yet) — verify with `--help` on
+  first real use.
+
 ## Not done yet (don't assume these exist)
 
 GitHub remote · GCP project(s) · Firebase projects (`-dev`/`-prod`) ·
