@@ -1,14 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
+
+// The <html data-theme> attribute is the single source of truth (the boot
+// script in layout.tsx sets it before hydration). React subscribes to it
+// instead of mirroring it into state — no effects, no hydration mismatch.
+function subscribe(onChange: () => void) {
+  const observer = new MutationObserver(onChange);
+  observer.observe(document.documentElement, {
+    attributes: true,
+    attributeFilter: ["data-theme"],
+  });
+  return () => observer.disconnect();
+}
+
+function getSnapshot(): "dark" | "light" {
+  return document.documentElement.dataset.theme === "light" ? "light" : "dark";
+}
+
+function getServerSnapshot(): "dark" | "light" {
+  return "dark"; // dark is the SSR default
+}
 
 export function ThemeToggle() {
-  // Dark is the SSR default; sync with whatever the inline boot script set
-  const [theme, setTheme] = useState<"dark" | "light">("dark");
-
-  useEffect(() => {
-    if (document.documentElement.dataset.theme === "light") setTheme("light");
-  }, []);
+  const theme = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 
   function toggle() {
     const next = theme === "dark" ? "light" : "dark";
@@ -22,7 +37,6 @@ export function ThemeToggle() {
     } catch {
       // private mode — toggle still works for this page view
     }
-    setTheme(next);
   }
 
   return (
