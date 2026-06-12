@@ -74,9 +74,9 @@ Actions, Secret Manager) is effectively free at this scale.
 flowchart TD
     U["Browser<br/>www.nutthapongkanna.com"] -->|"HTTPS (Universal SSL)"| CF["Cloudflare<br/>DNS proxy · WAF · Bot Fight<br/>Transform Rule adds X-Origin-Auth"]
     X["Direct *.run.app hit"] -. "no header → 404" .-> P
-    CF -->|"SSL Full (strict)<br/>CNAME → ghs.googlehosted.com"| CR["Cloud Run · websiteprofile<br/>asia-southeast1 · min 1 / max 10 · cpu-boost"]
-    SM["Secret Manager<br/>ORIGIN_AUTH_SECRET"] --- CR
-    subgraph CR ["Cloud Run — websiteprofile (asia-southeast1)"]
+    CF -->|"SSL Full (strict)<br/>CNAME → ghs.googlehosted.com"| P
+    SM["Secret Manager<br/>ORIGIN_AUTH_SECRET"] -.-> P
+    subgraph CRG ["Cloud Run — websiteprofile · asia-southeast1 · min 1 / max 10 · cpu-boost"]
         P["src/proxy.ts<br/>origin lockdown + host routing"] --> N["Next.js 16 standalone<br/>static pages (○)"]
     end
 ```
