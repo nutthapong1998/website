@@ -145,18 +145,27 @@ outside, not assumed. Facts learned during the actual launch:
   reaches Cloud Run without the header, lockdown fires. 404-before-orange
   + 200-after-orange is the expected sequence.
 
-## Known gaps (as of launch day)
+## Known gaps
 
-1. **Metadata/sitemap point at localhost** — the manual `--source` deploy
-   can't pass `NEXT_PUBLIC_SITE_URL` as a build arg, so the fallback
-   applied. Fix: change the code fallback to the real domain (it's
-   public info) and redeploy.
-2. **`cf-cache-status: DYNAMIC`** — the Edge-TTL cache rule isn't
-   matching/set yet; every request hits origin. Harmless at current
-   traffic, fix per scaling.md layer 1.
+1. ~~Metadata/sitemap localhost~~ **FIXED & verified in prod** — code
+   fallback is now the real domain (`||`, commit 73b3fe8); live
+   sitemap/robots/og:url all show https://www.nutthapongkanna.com.
+2. ~~cf-cache-status DYNAMIC~~ **FIXED & verified** — Cache Rule active:
+   hostname match + `not http.cookie contains "__session"`, Edge TTL
+   **2 minutes** with "Ignore cache-control header" (the respect-header
+   options keep HTML DYNAMIC because of Next's cache-control). Verified
+   MISS→HIT, 0.38s→0.058s. Note: free plan's TTL dropdown does offer
+   2 minutes.
 3. **CI/CD still dormant** — GitHub Variables (incl. `WIF_PROVIDER`) and
    the `production` environment not set; deploys are manual gcloud runs.
-   WIF/AR/deployer-SA setup from cicd.md not yet executed.
+   WIF/AR/deployer-SA setup from cicd.md not yet executed. Cloudflare
+   purge step is NOT needed in the release job (2-min TTL self-heals).
+
+Also live-verified: Cloudflare auto-injects "Managed content" into
+robots.txt that blocks AI crawlers (GPTBot, ClaudeBot, CCBot, …) and
+signals `ai-train=no`. For a personal-profile site the owner may prefer
+AI visibility — toggle lives in Cloudflare AI Crawl Control. Owner aware,
+undecided.
 
 ## Not done yet (don't assume these exist)
 
