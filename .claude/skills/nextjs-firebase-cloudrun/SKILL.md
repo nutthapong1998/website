@@ -169,20 +169,18 @@ export const config = {
 
 ### Cloudflare setup (order matters)
 
-**This project's chosen path (see project-notes.md): Cloudflare Origin
-Certificate on a GCP HTTPS Load Balancer** — Cloud Run can't hold custom
-certs, so the LB (serverless NEG → Cloud Run) terminates TLS with the
-Origin CA cert (~$18–25/mo). DNS is then an **A record to the LB IP,
-proxied (orange) from the start** — no grey-cloud waiting. Full commands
-in the project README "One-time setup §3". The alternative (no LB, free)
-is Cloud Run domain mapping + Google-managed cert: CNAME →
-`ghs.googlehosted.com`, grey-cloud until the cert provisions, then orange.
+**This project's chosen path (see project-notes.md): Cloud Run domain
+mapping + Google-managed cert — free, no load balancer.** The alternative
+(Cloudflare Origin Certificate) requires a GCP HTTPS LB (~$18–25/mo)
+because Cloud Run can't hold custom certs; it was considered and rejected
+on cost for this site.
 
-1. **DNS**: per the chosen path above.
+1. **DNS**: CNAME `www` and `admin` → the Cloud Run domain-mapping target
+   (`ghs.googlehosted.com`). Keep records **DNS-only (grey cloud)** until
+   the Google-managed cert finishes provisioning (~15 min), then switch to
+   **Proxied (orange cloud)**.
 2. **SSL/TLS mode = Full (strict)** — anything less (Flexible) causes
-   redirect loops with Cloud Run and silently downgrades security. With
-   the Origin CA cert, strict works immediately (Cloudflare trusts its
-   own CA; browsers don't — the LB IP must never be the public entry).
+   redirect loops with Cloud Run and silently downgrades security.
 3. **Transform Rule** (both hostnames): set request header `X-Origin-Auth` to
    a long random secret; store the same value in Secret Manager and wire it
    to Cloud Run as `ORIGIN_AUTH_SECRET`. This is what makes the middleware

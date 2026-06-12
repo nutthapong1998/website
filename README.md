@@ -62,16 +62,13 @@ experience, links.
 
 ## Deploy architecture
 
-TLS between Cloudflare and GCP uses a **Cloudflare Origin Certificate**.
-Cloud Run cannot hold a custom cert, so a global HTTPS Load Balancer
-terminates it and fronts the service (~$18–25/month for the LB):
+Cost-optimized: Cloud Run **domain mapping + Google-managed cert** (no
+load balancer) and `min-instances 0`. A profile site's traffic fits the
+Cloud Run free tier, so the running cost is ~฿0/month + the domain fee.
 
 ```
 Browser ──► Cloudflare (DNS proxy, SSL Full-strict, WAF, rate limit)
                 │  injects X-Origin-Auth secret header
-                ▼
-          GCP HTTPS Load Balancer (Cloudflare Origin CA cert)
-                │  serverless NEG
                 ▼
           Cloud Run "websiteprofile" (asia-southeast1)
                 │  proxy.ts: rejects requests without the header (404)
@@ -86,10 +83,10 @@ CI/CD:  PR → CI gate → merge main
 
 Direct `*.run.app` access always returns **404** — that is the origin
 lockdown working, not a bug. Real traffic must come through Cloudflare.
-The Origin CA cert is trusted **only by Cloudflare**, not by browsers —
-the site must always be reached through the proxied domain, never the LB
-IP directly (that's fine: requests to the bare LB also lack the
-`X-Origin-Auth` header and get 404).
+
+Trade-offs accepted for the price: first request after idle has a ~1–2s
+cold start (`--cpu-boost` softens it), and the one-time DNS setup has a
+short grey-cloud wait while Google provisions the domain cert.
 
 ## One-time setup
 
@@ -160,7 +157,7 @@ gcloud iam service-accounts add-iam-policy-binding $DEPLOYER \
 The deploy workflow stays skipped until `WIF_PROVIDER` is set, so steps can
 be done in any order without red ✗ runs.
 
-### 3. First deploy + Load Balancer with the Cloudflare Origin cert
+### 3. First deploy + custom domain
 
 The very first deploy is manual (CI needs an existing service to tag
 candidates on):
@@ -172,51 +169,20 @@ gcloud run deploy websiteprofile \
   --allow-unauthenticated \
   --service-account websiteprofile-runtime@$PROJECT.iam.gserviceaccount.com \
   --set-secrets ORIGIN_AUTH_SECRET=origin-auth-secret:latest \
-  --memory 512Mi --cpu 1 --min-instances 1 --max-instances 10 --cpu-boost
-```
+  --memory 512Mi --cpu 1 --min-instances 0 --max-instances 10 --cpu-boost
 
-Create the Origin Certificate in Cloudflare: **SSL/TLS → Origin Server →
-Create Certificate** (hostnames `<domain>`, `*.<domain>`; 15-year validity
-is fine). Save the certificate and private key to temp files, then:
-
-```bash
-# upload the cert to GCP, then DELETE the local key file — it's a secret
-gcloud compute ssl-certificates create cf-origin \
-  --project $PROJECT --certificate origin.pem --private-key origin-key.pem
-shred -u origin-key.pem origin.pem 2>/dev/null || rm -P origin-key.pem origin.pem
-
-# serverless NEG → backend → URL map → HTTPS proxy → static IP → forwarding rule
-gcloud compute network-endpoint-groups create websiteprofile-neg \
-  --project $PROJECT --region $REGION \
-  --network-endpoint-type serverless --cloud-run-service websiteprofile
-gcloud compute backend-services create websiteprofile-backend \
-  --project $PROJECT --global --load-balancing-scheme EXTERNAL_MANAGED
-gcloud compute backend-services add-backend websiteprofile-backend \
-  --project $PROJECT --global \
-  --network-endpoint-group websiteprofile-neg \
-  --network-endpoint-group-region $REGION
-gcloud compute url-maps create websiteprofile-lb \
-  --project $PROJECT --default-service websiteprofile-backend
-gcloud compute target-https-proxies create websiteprofile-https-proxy \
-  --project $PROJECT --url-map websiteprofile-lb --ssl-certificates cf-origin
-gcloud compute addresses create websiteprofile-ip --project $PROJECT --global
-gcloud compute forwarding-rules create websiteprofile-fr \
-  --project $PROJECT --global --load-balancing-scheme EXTERNAL_MANAGED \
-  --address websiteprofile-ip --target-https-proxy websiteprofile-https-proxy \
-  --ports 443
-
-# the IP for the Cloudflare DNS record:
-gcloud compute addresses describe websiteprofile-ip --project $PROJECT \
-  --global --format 'value(address)'
+# map the domain to the service — Google provisions a managed cert (free)
+gcloud beta run domain-mappings create --service websiteprofile \
+  --domain www.<domain> --project $PROJECT --region $REGION
 ```
 
 ### 4. Cloudflare (order matters)
 
-1. **DNS**: **A record** `www` → the LB IP from above, **Proxied (orange
-   cloud) from the start** — no grey-cloud waiting; the Origin cert is
-   already on the LB.
-2. **SSL/TLS → Full (strict)** — Cloudflare trusts its own Origin CA, so
-   strict works immediately. Anything less causes redirect loops.
+1. **DNS**: CNAME `www` → `ghs.googlehosted.com`, **DNS-only (grey cloud)**
+   first. Wait until the domain-mapping certificate finishes provisioning
+   (`gcloud beta run domain-mappings describe --domain www.<domain>`,
+   usually ~15 min), then switch the record to **Proxied (orange cloud)**.
+2. **SSL/TLS → Full (strict)** — anything less causes redirect loops.
 3. **Rules → Transform Rules → Modify Request Header**: on hostname
    `www.<domain>`, set header `X-Origin-Auth` = the value of
    `origin-auth-secret` (read it:
@@ -273,9 +239,8 @@ traffic; just merge the fix.
 | `*.run.app` URL returns 404 | Expected — origin lockdown. Real traffic comes via Cloudflare with the `X-Origin-Auth` header |
 | Site 404s through the domain too | Cloudflare Transform Rule header value ≠ `origin-auth-secret` — make them match, redeploy |
 | Infinite redirect loop via Cloudflare | SSL/TLS mode must be **Full (strict)**, not Flexible |
-| Cloudflare error **526** (invalid SSL cert) | LB is not serving the Origin cert — check `gcloud compute ssl-certificates list` and the target-https-proxy binding |
-| Cloudflare error **525** (handshake failed) | DNS A record points to the wrong IP, or the forwarding rule isn't on :443 |
-| Google-branded 404 from the domain | LB routing broken (NEG/url-map), traffic never reached Cloud Run — `gcloud compute backend-services describe websiteprofile-backend --global` |
+| Domain cert stuck "provisioning" | DNS record must be grey-cloud (DNS-only) until the cert issues, then re-enable proxy |
+| First request after idle is slow (~1–2s) | Cold start — accepted trade-off of `min-instances 0`; raise to 1 (~$5–10/mo) if it bothers you |
 | Deploy job skipped on push to main | `WIF_PROVIDER` variable not set yet — intended until GCP setup is done |
 | `auth@v2` fails in Actions | WIF `attribute-condition` must equal `'<owner>/<repo>'` exactly |
 | Release ran without approval | `production` environment is missing required reviewers |
