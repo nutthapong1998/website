@@ -1,7 +1,7 @@
 # websiteprofile
 
 Personal profile website of Nutthapong Kanna (Cloud Engineer, Big Data
-Institute). Production URL: not deployed yet.
+Institute). Production: https://www.nutthapongkanna.com
 
 **Stack**: Next.js 16 (App Router) · Cloud Run · Artifact Registry ·
 Cloudflare · GitHub Actions — Firebase (Firestore/Auth) and the admin CMS
@@ -10,7 +10,7 @@ are planned, not wired up yet; content currently lives in
 
 | Environment | URL |
 |---|---|
-| Production | (pending — Cloud Run + Cloudflare) |
+| Production | https://www.nutthapongkanna.com |
 | Local | http://localhost:3000 |
 
 ## Quick start
@@ -70,7 +70,7 @@ load balancer) and `min-instances 1` (one warm instance — no cold starts,
 Browser ──► Cloudflare (DNS proxy, SSL Full-strict, WAF, rate limit)
                 │  injects X-Origin-Auth secret header
                 ▼
-          Cloud Run "websiteprofile" (asia-southeast1)
+          Cloud Run "websiteprofile" (asia-southeast3)
                 │  proxy.ts: rejects requests without the header (404)
                 ▼
           Next.js standalone (static pages)
@@ -96,7 +96,7 @@ domain before running.
 ### 1. GCP
 
 ```bash
-PROJECT=<project-id>; REGION=asia-southeast1
+PROJECT=<project-id>; REGION=asia-southeast3
 
 # Artifact Registry repo for images
 gcloud artifacts repositories create web \
@@ -147,12 +147,12 @@ gcloud iam service-accounts add-iam-policy-binding $DEPLOYER \
 | Variable | Value |
 |---|---|
 | `GCP_PROJECT` | `<project-id>` |
-| `GCP_REGION` | `asia-southeast1` |
+| `GCP_REGION` | `asia-southeast3` |
 | `SERVICE` | `websiteprofile` |
-| `AR_IMAGE` | `asia-southeast1-docker.pkg.dev/<project-id>/web/site` |
+| `AR_IMAGE` | `asia-southeast3-docker.pkg.dev/<project-id>/web/site` |
 | `WIF_PROVIDER` | `projects/<project-number>/locations/global/workloadIdentityPools/github/providers/github-provider` |
 | `DEPLOYER_SA` | `deployer@<project-id>.iam.gserviceaccount.com` |
-| `SITE_URL` | `https://www.<domain>` (set after step 4) |
+| `SITE_URL` | `https://www.nutthapongkanna.com` (set after step 4) |
 
 The deploy workflow stays skipped until `WIF_PROVIDER` is set, so steps can
 be done in any order without red ✗ runs.
@@ -173,24 +173,24 @@ gcloud run deploy websiteprofile \
 
 # map the domain to the service — Google provisions a managed cert (free)
 gcloud beta run domain-mappings create --service websiteprofile \
-  --domain www.<domain> --project $PROJECT --region $REGION
+  --domain www.nutthapongkanna.com --project $PROJECT --region $REGION
 ```
 
 ### 4. Cloudflare (order matters)
 
 1. **DNS**: CNAME `www` → `ghs.googlehosted.com`, **DNS-only (grey cloud)**
    first. Wait until the domain-mapping certificate finishes provisioning
-   (`gcloud beta run domain-mappings describe --domain www.<domain>`,
+   (`gcloud beta run domain-mappings describe --domain www.nutthapongkanna.com`,
    usually ~15 min), then switch the record to **Proxied (orange cloud)**.
 2. **SSL/TLS → Full (strict)** — anything less causes redirect loops.
 3. **Rules → Transform Rules → Modify Request Header**: on hostname
-   `www.<domain>`, set header `X-Origin-Auth` = the value of
+   `www.nutthapongkanna.com`, set header `X-Origin-Auth` = the value of
    `origin-auth-secret` (read it:
    `gcloud secrets versions access latest --secret origin-auth-secret`).
    Without this rule every request gets 404 from the origin lockdown.
 4. **Security → WAF**: enable managed ruleset; add rate limiting
    (e.g. `/api/*` 60 req/min per IP). **Bot Fight Mode** on.
-5. **Caching → Cache Rules**: cache `www.<domain>/*` with Edge TTL 5 min,
+5. **Caching → Cache Rules**: cache `www.nutthapongkanna.com/*` with Edge TTL 5 min,
    bypass when a `__session` cookie is present; never cache `/api/*`.
 6. Set the `SITE_URL` GitHub variable and redeploy so metadata/sitemap use
    the real domain.
@@ -217,7 +217,7 @@ gcloud run services describe websiteprofile --project $PROJECT --region $REGION 
   --format 'value(status.traffic.list(format="{0}={1}%".format(revisionName,percent)))'
 
 # verify
-curl -s -o /dev/null -w "%{http_code}\n" https://www.<domain>     # expect 200
+curl -s -o /dev/null -w "%{http_code}\n" https://www.nutthapongkanna.com     # expect 200
 curl -s -o /dev/null -w "%{http_code}\n" \
   $(gcloud run services describe websiteprofile --project $PROJECT --region $REGION \
     --format 'value(status.url)')                                  # expect 404 (lockdown)
