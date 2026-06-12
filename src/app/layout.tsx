@@ -9,8 +9,11 @@ const sans = IBM_Plex_Sans_Thai({
   weight: ["400", "500", "600", "700"],
 });
 
-// || not ?? — Docker build args arrive as empty strings, not undefined
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+// || not ?? — Docker build args arrive as empty strings, not undefined.
+// Default to the real domain: it's public info, and --source deploys
+// can't pass build args, so the fallback IS production's value.
+const siteUrl =
+  process.env.NEXT_PUBLIC_SITE_URL || "https://www.nutthapongkanna.com";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
