@@ -1,0 +1,12 @@
+.env*
+*-service-account*.json
+*.pem
+*.key
+.git
+.github
+.claude
+node_modules
+.next
+README.md
+AGENTS.md
+CLAUDE.md

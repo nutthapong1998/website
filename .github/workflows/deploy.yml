@@ -1,0 +1,108 @@
+# Deploy pipeline per .claude/skills/nextjs-firebase-cloudrun/references/cicd.md
+#
+# merge to main
+#   → build image :<sha> → push Artifact Registry
+#   → deploy zero-traffic candidate revision on Cloud Run (users see nothing)
+#   → smoke test the candidate
+#   → [waits for human approval — GitHub environment "production"]
+#   → shift traffic + verify live
+#
+# Requires GitHub repo VARIABLES (Settings → Secrets and variables → Actions):
+#   GCP_PROJECT    e.g. websiteprofile-prod
+#   GCP_REGION     e.g. asia-southeast1
+#   SERVICE        e.g. websiteprofile
+#   AR_IMAGE       e.g. asia-southeast1-docker.pkg.dev/<project>/web/site
+#   WIF_PROVIDER   projects/<num>/locations/global/workloadIdentityPools/github/providers/github-provider
+#   DEPLOYER_SA    deployer@<project>.iam.gserviceaccount.com
+#   SITE_URL       e.g. https://www.example.com  (set after Cloudflare/domain exists)
+# and a GitHub environment named "production" with required reviewers.
+# The deploy job skips itself until WIF_PROVIDER is set.
+
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-candidate:
+    if: vars.WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - run: gcloud auth configure-docker ${{ vars.GCP_REGION }}-docker.pkg.dev --quiet
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build & push image
+        run: |
+          docker buildx build --push \
+            -t ${{ vars.AR_IMAGE }}:${{ github.sha }} \
+            --cache-from type=registry,ref=${{ vars.AR_IMAGE }}:buildcache \
+            --cache-to   type=registry,ref=${{ vars.AR_IMAGE }}:buildcache,mode=max \
+            --build-arg NEXT_PUBLIC_SITE_URL=${{ vars.SITE_URL }} \
+            .
+
+      - name: Deploy candidate (zero traffic)
+        run: |
+          gcloud run deploy ${{ vars.SERVICE }} \
+            --project ${{ vars.GCP_PROJECT }} \
+            --region ${{ vars.GCP_REGION }} \
+            --image ${{ vars.AR_IMAGE }}:${{ github.sha }} \
+            --no-traffic --tag candidate --quiet
+
+      - name: Smoke test candidate
+        run: |
+          URL=$(gcloud run services describe ${{ vars.SERVICE }} \
+            --project ${{ vars.GCP_PROJECT }} --region ${{ vars.GCP_REGION }} \
+            --format 'value(status.traffic.url)' | tr ';' '\n' | grep candidate)
+          AUTH=$(gcloud secrets versions access latest \
+            --secret origin-auth-secret --project ${{ vars.GCP_PROJECT }})
+          code=$(curl -s -o /dev/null -w '%{http_code}' -H "X-Origin-Auth: $AUTH" "$URL")
+          [ "$code" = "200" ] || { echo "candidate smoke test failed: $code"; exit 1; }
+
+  release:
+    needs: build-candidate
+    runs-on: ubuntu-latest
+    environment: production # waits here for human approval
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.DEPLOYER_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Shift traffic to candidate
+        run: |
+          gcloud run services update-traffic ${{ vars.SERVICE }} \
+            --project ${{ vars.GCP_PROJECT }} \
+            --region ${{ vars.GCP_REGION }} \
+            --to-latest --quiet
+
+      - name: Verify live
+        run: |
+          if [ -n "${{ vars.SITE_URL }}" ]; then
+            code=$(curl -s -o /dev/null -w '%{http_code}' "${{ vars.SITE_URL }}")
+            [ "$code" = "200" ] || { echo "prod verify failed: $code — roll back"; exit 1; }
+          fi
+          # origin lockdown must still hold: direct run.app access returns 404
+          lock=$(curl -s -o /dev/null -w '%{http_code}' \
+            $(gcloud run services describe ${{ vars.SERVICE }} \
+              --project ${{ vars.GCP_PROJECT }} --region ${{ vars.GCP_REGION }} \
+              --format 'value(status.url)'))
+          [ "$lock" = "404" ] || { echo "origin lockdown broken: $lock"; exit 1; }
