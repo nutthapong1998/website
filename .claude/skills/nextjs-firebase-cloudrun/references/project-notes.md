@@ -120,10 +120,48 @@ fits the free tier either way.
   yet) — verify `gcloud beta run domain-mappings` flags with `--help` on
   first real use.
 
+## LIVE since June 13, 2026 — launch facts (all verified)
+
+https://www.nutthapongkanna.com is in production: HTTP 200 via
+Cloudflare (`server: cloudflare`, SIN edge), security headers served,
+origin lockdown confirmed (direct run.app → 404). Verified by curl from
+outside, not assumed. Facts learned during the actual launch:
+
+- **Cert provisioning took ~15 min** once (a) the domain mapping existed
+  AND (b) the CNAME was grey-cloud. Fastest check is
+  `curl -s -o /dev/null -w '%{http_code}' https://<domain>` — `000` means
+  cert not issued (TLS handshake fails), any real code means issued.
+  A background poll loop on this works well as a "cert ready" notifier.
+- **Cloudflare Transform Rule warns "This rule may not apply to your
+  traffic" when the record is grey-cloud** — correct answer is "Ignore
+  and deploy rule anyway". NEVER pick "Create a new proxied DNS record":
+  it flips orange early and blocks cert issuance. The rule sits dormant
+  and activates when the cloud goes orange.
+- **Managed Transforms ≠ Transform Rules.** The toggle page
+  (Rules → Settings) cannot set custom headers; the custom rule lives at
+  Rules → Overview → Create rule → Request Header Transform Rule. The
+  owner got lost there once — point precisely.
+- Right after launch, domain (grey) returning 404 is CORRECT: traffic
+  reaches Cloud Run without the header, lockdown fires. 404-before-orange
+  + 200-after-orange is the expected sequence.
+
+## Known gaps (as of launch day)
+
+1. **Metadata/sitemap point at localhost** — the manual `--source` deploy
+   can't pass `NEXT_PUBLIC_SITE_URL` as a build arg, so the fallback
+   applied. Fix: change the code fallback to the real domain (it's
+   public info) and redeploy.
+2. **`cf-cache-status: DYNAMIC`** — the Edge-TTL cache rule isn't
+   matching/set yet; every request hits origin. Harmless at current
+   traffic, fix per scaling.md layer 1.
+3. **CI/CD still dormant** — GitHub Variables (incl. `WIF_PROVIDER`) and
+   the `production` environment not set; deploys are manual gcloud runs.
+   WIF/AR/deployer-SA setup from cicd.md not yet executed.
+
 ## Not done yet (don't assume these exist)
 
-GitHub remote · GCP project(s) · Firebase projects (`-dev`/`-prod`) ·
-admin app / OAuth / CMS (content is file-based) · Cloudflare zone /
-custom domain · `production` GitHub environment. The README runbook and
-this skill describe the plan; only the local site, git history, and
-workflow files are real so far.
+Firebase projects (`-dev`/`-prod`) · admin app / OAuth / CMS (content is
+file-based in `src/content/profile.ts`) · the CI/CD GCP plumbing in gap
+3 above. GitHub remote (`nutthapong1998/website`), GCP project, Cloud Run
+service (asia-southeast1), domain mapping, and Cloudflare zone are all
+real and live.

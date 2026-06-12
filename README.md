@@ -60,33 +60,72 @@ experience, links.
 
 ---
 
-## Deploy architecture
+## Architecture
 
-Cost-optimized: Cloud Run **domain mapping + Google-managed cert** (no
-load balancer) and `min-instances 1` (one warm instance — no cold starts,
-~$5–10/month). Request volume itself fits the Cloud Run free tier.
+**Live since June 2026.** Cost-optimized serverless: Cloud Run **domain
+mapping + Google-managed cert** (no load balancer) and `min-instances 1`
+(one warm instance — no cold starts, ~$5–10/month). Request volume itself
+fits the Cloud Run free tier; everything else (Cloudflare, GitHub
+Actions, Secret Manager) is effectively free at this scale.
 
+### Runtime — request path
+
+```mermaid
+flowchart TD
+    U["Browser<br/>www.nutthapongkanna.com"] -->|"HTTPS (Universal SSL)"| CF["Cloudflare<br/>DNS proxy · WAF · Bot Fight<br/>Transform Rule adds X-Origin-Auth"]
+    X["Direct *.run.app hit"] -. "no header → 404" .-> P
+    CF -->|"SSL Full (strict)<br/>CNAME → ghs.googlehosted.com"| CR["Cloud Run · websiteprofile<br/>asia-southeast1 · min 1 / max 10 · cpu-boost"]
+    SM["Secret Manager<br/>ORIGIN_AUTH_SECRET"] --- CR
+    subgraph CR ["Cloud Run — websiteprofile (asia-southeast1)"]
+        P["src/proxy.ts<br/>origin lockdown + host routing"] --> N["Next.js 16 standalone<br/>static pages (○)"]
+    end
 ```
-Browser ──► Cloudflare (DNS proxy, SSL Full-strict, WAF, rate limit)
-                │  injects X-Origin-Auth secret header
-                ▼
-          Cloud Run "websiteprofile" (asia-southeast1)
-                │  proxy.ts: rejects requests without the header (404)
-                ▼
-          Next.js standalone (static pages)
 
-CI/CD:  PR → CI gate → merge main
-          → GitHub Actions builds image :<sha> → Artifact Registry
-          → zero-traffic candidate revision on Cloud Run → smoke test
-          → human approves ("production" environment) → traffic flips
+Defense in depth, outermost first:
+
+1. **Cloudflare edge** — WAF managed rules, Bot Fight Mode, TLS
+   termination for browsers. Injects the `X-Origin-Auth` secret header
+   into every proxied request (Transform Rule).
+2. **Origin lockdown** ([src/proxy.ts](src/proxy.ts)) — any request
+   without the correct header gets 404. This is why hitting the
+   `*.run.app` URL directly returns 404: **working as intended, not a
+   bug.** The only way in is through Cloudflare.
+3. **App layer** — security headers (HSTS, CSP, X-Frame-Options DENY,
+   nosniff) baked in `next.config.ts`; all public pages statically
+   prerendered, no server-side data access on the public site.
+
+TLS has two independent legs: browser→Cloudflare uses Cloudflare's
+Universal SSL cert; Cloudflare→origin uses the Google-managed cert that
+the domain mapping provisioned (SSL mode Full strict).
+
+### Delivery — code path
+
+```mermaid
+flowchart LR
+    DEV["Push / PR<br/>(human + AI)"] --> CI["CI gate<br/>tsc · lint · build · gitleaks"]
+    CI --> MAIN["merge to main"]
+    MAIN --> BUILD["Build image :git-sha<br/>→ Artifact Registry"]
+    BUILD --> CAND["Zero-traffic candidate<br/>revision + smoke test"]
+    CAND --> GATE{"Human approves<br/>'production' environment"}
+    GATE -->|approve| LIVE["Traffic flips<br/>to new revision"]
+    GATE -->|reject / ignore| NOP["Candidate never<br/>receives traffic"]
 ```
 
-Direct `*.run.app` access always returns **404** — that is the origin
-lockdown working, not a bug. Real traffic must come through Cloudflare.
+- Rollback = shift traffic back to the previous revision (~10 seconds,
+  no rebuild): commands in "Verify & rollback" below.
+- The pipeline workflows exist in [.github/workflows/](.github/workflows/)
+  but stay **dormant until the GitHub Variables are set** (see One-time
+  setup §2) — until then, deploys are the manual command in §3.
 
-Trade-off accepted for the price: the one-time DNS setup has a short
-grey-cloud wait while Google provisions the domain cert. (`min-instances 1`
-was chosen over 0 to avoid cold starts, at ~$5–10/month.)
+### Key decisions (and why)
+
+| Decision | Why |
+|---|---|
+| Domain mapping + Google cert, no Load Balancer | LB costs ~$18–25/mo — unjustifiable for a profile site. Mapping is free; trade-off is a one-time grey-cloud wait (~15 min) for cert provisioning |
+| `min-instances 1` | No cold starts; ~$5–10/mo accepted knowingly |
+| Region `asia-southeast1` | Forced: domain mappings are not allowed in `asia-southeast3` (GCP returns 501) |
+| Header-based origin lockdown (not ingress restriction) | Keeps `*.run.app` reachable for CI candidate smoke tests while still blocking the public |
+| Content in a file, not a CMS | A profile site edited a few times a year doesn't need a database; git is the CMS until the planned admin app justifies itself |
 
 ## One-time setup
 
