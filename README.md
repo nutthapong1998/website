@@ -70,7 +70,7 @@ load balancer) and `min-instances 1` (one warm instance — no cold starts,
 Browser ──► Cloudflare (DNS proxy, SSL Full-strict, WAF, rate limit)
                 │  injects X-Origin-Auth secret header
                 ▼
-          Cloud Run "websiteprofile" (asia-southeast3)
+          Cloud Run "websiteprofile" (asia-southeast1)
                 │  proxy.ts: rejects requests without the header (404)
                 ▼
           Next.js standalone (static pages)
@@ -96,7 +96,7 @@ domain before running.
 ### 1. GCP
 
 ```bash
-PROJECT=<project-id>; REGION=asia-southeast3
+PROJECT=<project-id>; REGION=asia-southeast1
 
 # Artifact Registry repo for images
 gcloud artifacts repositories create web \
@@ -147,9 +147,9 @@ gcloud iam service-accounts add-iam-policy-binding $DEPLOYER \
 | Variable | Value |
 |---|---|
 | `GCP_PROJECT` | `<project-id>` |
-| `GCP_REGION` | `asia-southeast3` |
+| `GCP_REGION` | `asia-southeast1` |
 | `SERVICE` | `websiteprofile` |
-| `AR_IMAGE` | `asia-southeast3-docker.pkg.dev/<project-id>/web/site` |
+| `AR_IMAGE` | `asia-southeast1-docker.pkg.dev/<project-id>/web/site` |
 | `WIF_PROVIDER` | `projects/<project-number>/locations/global/workloadIdentityPools/github/providers/github-provider` |
 | `DEPLOYER_SA` | `deployer@<project-id>.iam.gserviceaccount.com` |
 | `SITE_URL` | `https://www.nutthapongkanna.com` (set after step 4) |

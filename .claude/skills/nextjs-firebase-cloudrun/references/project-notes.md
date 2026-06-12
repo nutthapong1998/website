@@ -106,6 +106,13 @@ fits the free tier either way.
   knowingly after seeing the ~$5–10/mo figure.
 - DNS one-time dance: CNAME → `ghs.googlehosted.com`, grey-cloud until the
   managed cert provisions (~15 min), then orange. SSL Full (strict).
+- **Region is `asia-southeast1` (Singapore) — forced by GCP.** The owner
+  first deployed to `asia-southeast3`, but the domain-mapping API returned
+  501 "Creating domain mappings is not allowed in asia-southeast3"
+  (verified live, June 2026). Domain mappings only work in a subset of
+  regions; asia-southeast1 is in it. Don't move the service to another
+  region without checking this constraint first. The old asia-southeast3
+  service must be deleted to avoid double min-instances cost.
 - Cloud Run ingress stays **"all"**: the CI smoke test hits the candidate
   tag's `*.run.app` URL with the `X-Origin-Auth` header. Don't "harden"
   ingress without redesigning the pipeline.
