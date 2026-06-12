@@ -63,8 +63,8 @@ experience, links.
 ## Deploy architecture
 
 Cost-optimized: Cloud Run **domain mapping + Google-managed cert** (no
-load balancer) and `min-instances 0`. A profile site's traffic fits the
-Cloud Run free tier, so the running cost is ~฿0/month + the domain fee.
+load balancer) and `min-instances 1` (one warm instance — no cold starts,
+~$5–10/month). Request volume itself fits the Cloud Run free tier.
 
 ```
 Browser ──► Cloudflare (DNS proxy, SSL Full-strict, WAF, rate limit)
@@ -84,9 +84,9 @@ CI/CD:  PR → CI gate → merge main
 Direct `*.run.app` access always returns **404** — that is the origin
 lockdown working, not a bug. Real traffic must come through Cloudflare.
 
-Trade-offs accepted for the price: first request after idle has a ~1–2s
-cold start (`--cpu-boost` softens it), and the one-time DNS setup has a
-short grey-cloud wait while Google provisions the domain cert.
+Trade-off accepted for the price: the one-time DNS setup has a short
+grey-cloud wait while Google provisions the domain cert. (`min-instances 1`
+was chosen over 0 to avoid cold starts, at ~$5–10/month.)
 
 ## One-time setup
 
@@ -169,7 +169,7 @@ gcloud run deploy websiteprofile \
   --allow-unauthenticated \
   --service-account websiteprofile-runtime@$PROJECT.iam.gserviceaccount.com \
   --set-secrets ORIGIN_AUTH_SECRET=origin-auth-secret:latest \
-  --memory 512Mi --cpu 1 --min-instances 0 --max-instances 10 --cpu-boost
+  --memory 512Mi --cpu 1 --min-instances 1 --max-instances 10 --cpu-boost
 
 # map the domain to the service — Google provisions a managed cert (free)
 gcloud beta run domain-mappings create --service websiteprofile \
@@ -240,7 +240,7 @@ traffic; just merge the fix.
 | Site 404s through the domain too | Cloudflare Transform Rule header value ≠ `origin-auth-secret` — make them match, redeploy |
 | Infinite redirect loop via Cloudflare | SSL/TLS mode must be **Full (strict)**, not Flexible |
 | Domain cert stuck "provisioning" | DNS record must be grey-cloud (DNS-only) until the cert issues, then re-enable proxy |
-| First request after idle is slow (~1–2s) | Cold start — accepted trade-off of `min-instances 0`; raise to 1 (~$5–10/mo) if it bothers you |
+| Unexpected idle cost on the bill | `min-instances 1` keeps one warm instance (~$5–10/mo) — drop to 0 if cost matters more than cold starts |
 | Deploy job skipped on push to main | `WIF_PROVIDER` variable not set yet — intended until GCP setup is done |
 | `auth@v2` fails in Actions | WIF `attribute-condition` must equal `'<owner>/<repo>'` exactly |
 | Release ran without approval | `production` environment is missing required reviewers |

@@ -90,19 +90,20 @@ installed version disagrees with this file, the installed version wins
 
 ## TLS / domain / cost decision (June 2026)
 
-**Chosen: the cheap path.** Cloud Run **domain mapping + Google-managed
-cert** (free) and **`min-instances 0`** — total running cost ~฿0/month
-(profile-site traffic fits the Cloud Run free tier; only the domain fee
-remains). Decided by the owner explicitly on cost grounds.
+**Chosen: domain mapping (free TLS) + `min-instances 1`.** Cloud Run
+**domain mapping + Google-managed cert** — no load balancer. The owner
+first picked `min-instances 0` (~฿0/mo), then explicitly bumped to
+**`min-instances 1`** (~$5–10/mo) to avoid cold starts. Request volume
+fits the free tier either way.
 
 - A **Cloudflare Origin Certificate + GCP HTTPS LB** design was fully
   specced first and then **rejected**: the LB alone costs ~$18–25/mo,
   unjustifiable for this site. The owner has an Origin cert generated
   (15-year validity) — reusable if an LB/VM project ever appears, but do
   NOT resurrect the LB design here without a new cost conversation.
-- `min-instances 0` accepts a ~1–2s cold start on the first request after
-  idle (`--cpu-boost` softens it). scaling.md's `min-instances 1` advice
-  is the generic recommendation; this project consciously overrides it.
+- `min-instances 1` matches scaling.md's generic advice (absorbs the
+  first second of a spike, no cold starts); the cost was accepted
+  knowingly after seeing the ~$5–10/mo figure.
 - DNS one-time dance: CNAME → `ghs.googlehosted.com`, grey-cloud until the
   managed cert provisions (~15 min), then orange. SSL Full (strict).
 - Cloud Run ingress stays **"all"**: the CI smoke test hits the candidate
